@@ -35,31 +35,41 @@ export default async function handler(request: Request) {
         const nailDesignImagePart = { inlineData: { mimeType: nailDesignImage.type, data: nailDesignImage.base64 } };
         const textPart = { text: "Użyj pierwszego zdjęcia jako bazy. Nałóż wzór paznokci z drugiego zdjęcia na paznokcie widoczne na pierwszym zdjęciu. Zachowaj oryginalną dłoń, odcień skóry i tło. Rezultatem powinno być wyłącznie ostateczne, edytowane zdjęcie." };
 
-        const response = await ai.models.generateContent({
+        const geminiStream = await ai.models.generateContentStream({
             model: 'gemini-2.5-flash-image',
             contents: { parts: [handImagePart, nailDesignImagePart, textPart] },
             config: { responseModalities: [Modality.IMAGE] },
         });
 
-        const imagePart = response.candidates?.[0]?.content?.parts?.find((part: any) => part.inlineData);
+        // Tworzymy nowy strumień, który będzie wysłany do przeglądarki
+        const readableStream = new ReadableStream({
+            async start(controller) {
+                const encoder = new TextEncoder();
+                for await (const chunk of geminiStream) {
+                    const imagePart = chunk.candidates?.[0]?.content?.parts?.find((part: any) => part.inlineData);
+                    
+                    if (imagePart && imagePart.inlineData) {
+                        const imageUrl = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
+                        controller.enqueue(encoder.encode(JSON.stringify({ imageUrl })));
+                        break; 
+                    }
+                    
+                    const finishReason = chunk.candidates?.[0]?.finishReason;
+                    if (finishReason && finishReason !== 'STOP') {
+                         const errorMessage = finishReason === 'SAFETY' 
+                            ? 'Wygenerowanie obrazu nie było możliwe z powodu ustawień bezpieczeństwa. Spróbuj użyć innych zdjęć.'
+                            : `AI zakończyło z powodem: ${finishReason}`;
+                        controller.enqueue(encoder.encode(JSON.stringify({ error: errorMessage })));
+                        break;
+                    }
+                }
+                controller.close();
+            }
+        });
 
-        if (imagePart && imagePart.inlineData) {
-            const imageUrl = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-            return new Response(JSON.stringify({ imageUrl }), {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' },
-            });
-        } else {
-             const safetyError = response.candidates?.[0]?.finishReason;
-             const errorMessage = safetyError === 'SAFETY' 
-                ? 'Wygenerowanie obrazu nie było możliwe z powodu ustawień bezpieczeństwa. Spróbuj użyć innych zdjęć.'
-                : 'AI nie udało się wygenerować obrazu. Proszę spróbować ponownie.';
-
-            return new Response(JSON.stringify({ error: errorMessage }), {
-                status: 500,
-                headers: { 'Content-Type': 'application/json' },
-            });
-        }
+        return new Response(readableStream, {
+            headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        });
         
     } catch (error) {
         console.error("Błąd wykonania funkcji serwerowej:", error);
