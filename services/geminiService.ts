@@ -10,24 +10,38 @@ export const generateNailDesign = async (handImage: UploadedFile, nailDesignImag
             body: JSON.stringify({ handImage, nailDesignImage }),
         });
 
-        const data = await response.json();
-
         if (!response.ok) {
-            // Użyj komunikatu o błędzie z serwera, jeśli jest dostępny
-            throw new Error(data.error || `Błąd serwera: ${response.status}`);
+            // Spróbuj odczytać treść błędu, nawet jeśli nie jest to JSON
+            const errorText = await response.text();
+            throw new Error(JSON.parse(errorText).error || `Błąd serwera: ${response.status} - ${errorText}`);
         }
+
+        // Odczytywanie odpowiedzi strumieniowej
+        if (!response.body) {
+            throw new Error('Brak ciała odpowiedzi strumieniowej.');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let result = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            result += decoder.decode(value, { stream: true });
+        }
+        
+        const data = JSON.parse(result);
 
         if (data.imageUrl) {
             return data.imageUrl;
         }
 
-        // To jest mało prawdopodobne, jeśli serwer zwraca status 200, ale to dobre zabezpieczenie
-        throw new Error('Nie otrzymano obrazu z serwera.');
+        throw new Error(data.error || 'Nie otrzymano obrazu z serwera.');
 
     } catch (error) {
         console.error("Błąd podczas komunikacji z funkcją serwerową:", error);
         if (error instanceof Error) {
-            // Rzuć błąd dalej, aby został przechwycony przez komponent
             throw new Error(`Nie udało się wygenerować wzoru: ${error.message}`);
         }
         throw new Error("Wystąpił nieznany błąd podczas generowania wzoru paznokci.");
