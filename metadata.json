@@ -1,0 +1,5 @@
+{
+  "name": "Nail Art Virtual Try-On",
+  "description": "An application that uses AI to let users virtually try on different nail designs. Users upload a photo of their hand and a photo of a nail design, and the AI generates an image of their hand with the new design applied.",
+  "requestFramePermissions": []
+}
